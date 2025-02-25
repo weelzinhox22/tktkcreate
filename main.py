@@ -2,8 +2,7 @@ import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QPushButton, QLabel, QComboBox, QSpinBox, QLineEdit,
                            QTextEdit, QMessageBox, QHBoxLayout, QGridLayout, QFileDialog,
-                           QDoubleSpinBox, QListWidget, QTabWidget, QGroupBox, QDialog, QFormLayout,
-                           QDateEdit, QCheckBox)
+                           QDoubleSpinBox, QListWidget, QTabWidget, QGroupBox, QDialog)
 from PyQt6.QtCore import Qt, QUrl, QTimer
 from PyQt6.QtGui import QIcon, QFont, QPixmap
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -24,7 +23,6 @@ from deep_translator import GoogleTranslator
 import openai
 import hashlib
 import datetime
-import uuid
 
 # Adicionar no início do arquivo, após as importações
 STYLE_SHEET = """
@@ -203,131 +201,70 @@ class WebViewWindow(QWidget):
 class LicenseManager:
     def __init__(self):
         self.license_file = "config/license.key"
-        # Atualize para usar o servidor online
-        self.api_url = "https://tktkcreate.onrender.com/licenses"
-        self.app_secret = "7d9f8b3a2e1c4b5a6d8e9f2c1b4a7d3e"
-        # Licenças válidas hardcoded para teste
-        self.valid_licenses = {
-            "DARKTK-PRO-2024": {
-                "type": "Professional",
-                "expires": "2025-12-31",
-                "features": ["all"]
-            },
-            "DARKTK-STD-2024": {
-                "type": "Standard",
-                "expires": "2025-12-31",
-                "features": ["basic"]
+        self.license_data_file = "config/valid_licenses.json"
+        self.create_config_dir()
+        
+    def create_config_dir(self):
+        if not os.path.exists("config"):
+            os.makedirs("config")
+            
+        # Criar arquivo de licenças válidas se não existir
+        if not os.path.exists(self.license_data_file):
+            default_licenses = {
+                "DARKTK-PRO-2024": {
+                    "type": "Professional",
+                    "expires": "2025-12-31",
+                    "features": ["all"]
+                },
+                "DARKTK-STD-2024": {
+                    "type": "Standard",
+                    "expires": "2025-12-31",
+                    "features": ["basic", "audio", "images"]
+                },
+                "DARKTK-NEW-KEY1": {
+                    "type": "Professional",
+                    "expires": "2025-12-31",
+                    "features": ["all"]
+                },
+                "CUSTOM-KEY-123": {
+                    "type": "Standard",
+                    "expires": "2024-12-31",
+                    "features": ["basic", "audio"]
+                }
             }
-        }
+            with open(self.license_data_file, 'w') as f:
+                json.dump(default_licenses, f, indent=4)
 
-    def verify_license_online(self, key):
-        """Verifica se a licença é válida"""
-        if key in self.valid_licenses:
-            return True, self.valid_licenses[key]
-        return False, None
-
-    def save_license_locally(self, key, license_data):
-        """Salva a licença localmente"""
-        os.makedirs("config", exist_ok=True)
-        with open(self.license_file, 'w') as f:
-            json.dump({
-                "key": key,
-                "type": license_data["type"],
-                "expires": license_data["expires"],
-                "features": license_data["features"]
-            }, f)
-
-    def load_license(self):
-        """Carrega a licença salva"""
+    def get_valid_licenses(self):
         try:
-            if os.path.exists(self.license_file):
-                with open(self.license_file, 'r') as f:
-                    data = json.load(f)
-                    return data.get("key")
-            return None
-        except:
-            return None
-
-    def activate_license(self, key):
-        """Ativa uma nova licença"""
-        success, license_data = self.verify_license_online(key)
-        if success:
-            self.save_license_locally(key, license_data)
-        return success, license_data
-
-    def get_usage_history(self):
-        """Retorna histórico de uso da licença"""
-        try:
-            response = requests.get(f"{self.api_url}/licenses/history", json={
-                "license_key": self.load_license()
-            })
-            return response.json().get('history', [])
-        except:
-            return []
-    
-    def generate_report(self, start_date, end_date):
-        """Gera relatório de vendas/uso"""
-        try:
-            response = requests.post(f"{self.api_url}/licenses/report", json={
-                "start_date": start_date.isoformat(),
-                "end_date": end_date.isoformat()
-            })
-            return response.json()
+            with open(self.license_data_file, 'r') as f:
+                return json.load(f)
         except:
             return {}
-    
-    def create_backup(self):
-        """Cria backup da licença atual"""
+
+    def verify_license(self, key):
+        valid_licenses = self.get_valid_licenses()
+        if key in valid_licenses:
+            license_data = valid_licenses[key]
+            expiry = datetime.datetime.strptime(license_data['expires'], '%Y-%m-%d')
+            if expiry > datetime.datetime.now():
+                return True, license_data
+        return False, None
+
+    def save_license(self, key):
         try:
-            key = self.load_license()
-            if not key:
-                raise Exception("Nenhuma licença ativa")
-                
-            backup_dir = "backups"
-            os.makedirs(backup_dir, exist_ok=True)
-            
-            filename = f"license_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            filepath = os.path.join(backup_dir, filename)
-            
-            with open(self.license_file, 'r') as src, open(filepath, 'w') as dst:
-                dst.write(src.read())
-                
-            return filename
-        except Exception as e:
-            raise Exception(f"Erro ao criar backup: {str(e)}")
-    
-    def restore_backup(self, filename):
-        """Restaura um backup"""
-        try:
-            backup_path = os.path.join("backups", filename)
-            if not os.path.exists(backup_path):
-                raise Exception("Backup não encontrado")
-                
-            with open(backup_path, 'r') as src, open(self.license_file, 'w') as dst:
-                dst.write(src.read())
-                
-        except Exception as e:
-            raise Exception(f"Erro ao restaurar backup: {str(e)}")
-    
-    def list_backups(self):
-        """Lista backups disponíveis"""
-        try:
-            backup_dir = "backups"
-            if not os.path.exists(backup_dir):
-                return []
-            return [f for f in os.listdir(backup_dir) if f.startswith("license_backup_")]
+            with open(self.license_file, 'w') as f:
+                f.write(key)
+            return True
         except:
-            return []
-    
-    def check_expiry(self, days):
-        """Verifica licenças próximas de expirar"""
+            return False
+
+    def load_license(self):
         try:
-            response = requests.post(f"{self.api_url}/licenses/check-expiry", json={
-                "days": days
-            })
-            return response.json().get('notifications', [])
+            with open(self.license_file, 'r') as f:
+                return f.read().strip()
         except:
-            return []
+            return None
 
 class LicenseDialog(QDialog):
     def __init__(self, license_manager):
@@ -397,474 +334,15 @@ class LicenseDialog(QDialog):
     
     def activate_license(self):
         key = self.license_input.text().strip()
-        success, license_data = self.license_manager.activate_license(key)
+        success, license_data = self.license_manager.verify_license(key)
         
         if success:
+            self.license_manager.save_license(key)
             self.status_label.setStyleSheet("color: #4CAF50;")
             self.status_label.setText(f"Licença {license_data['type']} ativada com sucesso!")
             QTimer.singleShot(1500, self.accept)
         else:
             self.status_label.setText("Chave de licença inválida!")
-
-class LicenseStatusWindow(QWidget):
-    def __init__(self, license_manager):
-        super().__init__()
-        self.license_manager = license_manager
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QVBoxLayout()
-        
-        # Grupo de informações da licença
-        info_group = QGroupBox("Informações da Licença")
-        info_layout = QFormLayout()
-        
-        # Status atual
-        self.status_label = QLabel("Verificando...")
-        self.status_label.setStyleSheet("font-weight: bold;")
-        info_layout.addRow("Status:", self.status_label)
-        
-        # Tipo de licença
-        self.type_label = QLabel("-")
-        info_layout.addRow("Tipo:", self.type_label)
-        
-        # Data de expiração
-        self.expiry_label = QLabel("-")
-        info_layout.addRow("Expira em:", self.expiry_label)
-        
-        # Chave
-        self.key_label = QLabel("-")
-        info_layout.addRow("Chave:", self.key_label)
-        
-        info_group.setLayout(info_layout)
-        layout.addWidget(info_group)
-        
-        # Botão de verificar
-        check_btn = QPushButton("Verificar Licença")
-        check_btn.setProperty("class", "primary")
-        check_btn.clicked.connect(self.check_license)
-        layout.addWidget(check_btn)
-        
-        # Área de status
-        self.message_label = QLabel("")
-        self.message_label.setWordWrap(True)
-        layout.addWidget(self.message_label)
-        
-        layout.addStretch()
-        self.setLayout(layout)
-        
-        # Verificar licença ao iniciar
-        QTimer.singleShot(100, self.check_license)
-    
-    def check_license(self):
-        try:
-            key = self.license_manager.load_license()
-            if not key:
-                self.update_status("Sem licença", "error")
-                return
-                
-            success, license_data = self.license_manager.verify_license_online(key)
-            
-            if success:
-                self.status_label.setText("Ativa")
-                self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
-                self.type_label.setText(license_data["type"])
-                self.expiry_label.setText(license_data["expires"])
-                self.key_label.setText(key)
-                self.message_label.setText("Licença válida!")
-                self.message_label.setStyleSheet("color: #4CAF50;")
-            else:
-                self.update_status("Expirada", "error")
-        except Exception as e:
-            self.update_status(f"Erro: {str(e)}", "error")
-    
-    def update_status(self, message, status="normal"):
-        self.status_label.setText("Inativa")
-        self.status_label.setStyleSheet("color: #FF5252; font-weight: bold;")
-        self.message_label.setText(message)
-        self.message_label.setStyleSheet("color: #FF5252;")
-
-class LicenseManagerWindow(QWidget):
-    def __init__(self, license_manager):
-        super().__init__()
-        self.license_manager = license_manager
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QVBoxLayout()
-        
-        # Tabs para diferentes funcionalidades
-        tabs = QTabWidget()
-        
-        # Tab de Status da Licença
-        status_tab = QWidget()
-        status_layout = QVBoxLayout()
-        
-        # Informações da licença atual
-        info_group = QGroupBox("Sua Licença")
-        info_layout = QFormLayout()
-        
-        self.status_label = QLabel("Verificando...")
-        self.type_label = QLabel("-")
-        self.expiry_label = QLabel("-")
-        self.activations_label = QLabel("-")
-        
-        info_layout.addRow("Status:", self.status_label)
-        info_layout.addRow("Tipo:", self.type_label)
-        info_layout.addRow("Expira em:", self.expiry_label)
-        info_layout.addRow("Ativações:", self.activations_label)
-        
-        info_group.setLayout(info_layout)
-        status_layout.addWidget(info_group)
-        
-        # Botão de verificar
-        check_btn = QPushButton("Verificar Licença")
-        check_btn.clicked.connect(self.check_license)
-        status_layout.addWidget(check_btn)
-        
-        status_tab.setLayout(status_layout)
-        tabs.addTab(status_tab, "Status")
-        
-        # Tab de Upgrade
-        upgrade_tab = QWidget()
-        upgrade_layout = QVBoxLayout()
-        
-        upgrade_group = QGroupBox("Upgrade de Licença")
-        upgrade_form = QFormLayout()
-        
-        self.upgrade_type = QComboBox()
-        self.upgrade_type.addItems(["standard", "professional", "enterprise"])
-        
-        upgrade_form.addRow("Novo Tipo:", self.upgrade_type)
-        
-        upgrade_btn = QPushButton("Fazer Upgrade")
-        upgrade_btn.clicked.connect(self.upgrade_license)
-        
-        upgrade_group.setLayout(upgrade_form)
-        upgrade_layout.addWidget(upgrade_group)
-        upgrade_layout.addWidget(upgrade_btn)
-        
-        upgrade_tab.setLayout(upgrade_layout)
-        tabs.addTab(upgrade_tab, "Upgrade")
-        
-        # Tab de Revendedor
-        reseller_tab = QWidget()
-        reseller_layout = QVBoxLayout()
-        
-        reseller_group = QGroupBox("Registro de Revendedor")
-        reseller_form = QFormLayout()
-        
-        self.reseller_name = QLineEdit()
-        self.reseller_email = QLineEdit()
-        self.commission_rate = QDoubleSpinBox()
-        self.commission_rate.setRange(0.1, 0.5)
-        self.commission_rate.setSingleStep(0.05)
-        self.commission_rate.setValue(0.2)
-        
-        reseller_form.addRow("Nome:", self.reseller_name)
-        reseller_form.addRow("Email:", self.reseller_email)
-        reseller_form.addRow("Comissão (%):", self.commission_rate)
-        
-        register_btn = QPushButton("Registrar como Revendedor")
-        register_btn.clicked.connect(self.register_reseller)
-        
-        reseller_group.setLayout(reseller_form)
-        reseller_layout.addWidget(reseller_group)
-        reseller_layout.addWidget(register_btn)
-        
-        reseller_tab.setLayout(reseller_layout)
-        tabs.addTab(reseller_tab, "Revendedor")
-        
-        # Status messages
-        self.status_message = QLabel("")
-        self.status_message.setStyleSheet("color: #4CAF50;")
-        self.status_message.setWordWrap(True)
-        
-        layout.addWidget(tabs)
-        layout.addWidget(self.status_message)
-        self.setLayout(layout)
-        
-        # Verificar licença ao iniciar
-        QTimer.singleShot(100, self.check_license)
-    
-    def check_license(self):
-        try:
-            key = self.license_manager.load_license()
-            if not key:
-                self.update_status("Sem licença", "error")
-                return
-            
-            success, data = self.license_manager.verify_license_online(key)
-            
-            if success:
-                self.status_label.setText("Ativa")
-                self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
-                self.type_label.setText(data["type"])
-                self.expiry_label.setText(data["expires"])
-                self.activations_label.setText(f"{data['activations']}/{data['max_activations']}")
-                self.update_status("Licença válida!", "success")
-            else:
-                self.update_status("Licença inválida", "error")
-        except Exception as e:
-            self.update_status(f"Erro: {str(e)}", "error")
-    
-    def upgrade_license(self):
-        try:
-            key = self.license_manager.load_license()
-            if not key:
-                self.update_status("Sem licença para upgrade", "error")
-                return
-            
-            new_type = self.upgrade_type.currentText()
-            success = self.license_manager.upgrade_license(key, new_type)
-            
-            if success:
-                self.update_status(f"Licença atualizada para {new_type}!", "success")
-                self.check_license()
-            else:
-                self.update_status("Falha no upgrade", "error")
-        except Exception as e:
-            self.update_status(f"Erro no upgrade: {str(e)}", "error")
-    
-    def register_reseller(self):
-        try:
-            name = self.reseller_name.text()
-            email = self.reseller_email.text()
-            commission = self.commission_rate.value()
-            
-            if not name or not email:
-                self.update_status("Preencha todos os campos", "error")
-                return
-            
-            result = self.license_manager.register_reseller(name, email, commission)
-            
-            if result.get("success"):
-                self.update_status(f"Revendedor registrado! ID: {result['reseller_id']}", "success")
-                self.reseller_name.clear()
-                self.reseller_email.clear()
-            else:
-                self.update_status("Falha no registro", "error")
-        except Exception as e:
-            self.update_status(f"Erro no registro: {str(e)}", "error")
-    
-    def update_status(self, message, status="normal"):
-        self.status_message.setText(message)
-        if status == "error":
-            self.status_message.setStyleSheet("color: #FF5252;")
-        elif status == "success":
-            self.status_message.setStyleSheet("color: #4CAF50;")
-        else:
-            self.status_message.setStyleSheet("color: white;")
-
-class LicenseHistoryWindow(QWidget):
-    def __init__(self, license_manager):
-        super().__init__()
-        self.license_manager = license_manager
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QVBoxLayout()
-        
-        # Tabs para diferentes visualizações
-        tabs = QTabWidget()
-        
-        # Tab de Histórico de Uso
-        usage_tab = QWidget()
-        usage_layout = QVBoxLayout()
-        
-        # Lista de atividades
-        self.usage_list = QListWidget()
-        usage_layout.addWidget(QLabel("Histórico de Uso"))
-        usage_layout.addWidget(self.usage_list)
-        
-        # Botão de atualizar
-        refresh_btn = QPushButton("Atualizar Histórico")
-        refresh_btn.clicked.connect(self.load_usage_history)
-        usage_layout.addWidget(refresh_btn)
-        
-        usage_tab.setLayout(usage_layout)
-        tabs.addTab(usage_tab, "Histórico")
-        
-        # Tab de Relatórios
-        reports_tab = QWidget()
-        reports_layout = QVBoxLayout()
-        
-        # Período do relatório
-        period_group = QGroupBox("Período")
-        period_layout = QHBoxLayout()
-        
-        self.start_date = QDateEdit()
-        self.start_date.setDate(datetime.date.today().replace(day=1))
-        self.end_date = QDateEdit()
-        self.end_date.setDate(datetime.date.today())
-        
-        period_layout.addWidget(QLabel("De:"))
-        period_layout.addWidget(self.start_date)
-        period_layout.addWidget(QLabel("Até:"))
-        period_layout.addWidget(self.end_date)
-        
-        period_group.setLayout(period_layout)
-        reports_layout.addWidget(period_group)
-        
-        # Botão gerar relatório
-        generate_btn = QPushButton("Gerar Relatório")
-        generate_btn.clicked.connect(self.generate_report)
-        reports_layout.addWidget(generate_btn)
-        
-        # Área do relatório
-        self.report_text = QTextEdit()
-        self.report_text.setReadOnly(True)
-        reports_layout.addWidget(self.report_text)
-        
-        reports_tab.setLayout(reports_layout)
-        tabs.addTab(reports_tab, "Relatórios")
-        
-        # Tab de Backup
-        backup_tab = QWidget()
-        backup_layout = QVBoxLayout()
-        
-        # Grupo de backup
-        backup_group = QGroupBox("Backup de Licença")
-        backup_form = QVBoxLayout()
-        
-        # Botões de backup
-        create_backup_btn = QPushButton("Criar Backup")
-        create_backup_btn.clicked.connect(self.create_backup)
-        restore_backup_btn = QPushButton("Restaurar Backup")
-        restore_backup_btn.clicked.connect(self.restore_backup)
-        
-        backup_form.addWidget(create_backup_btn)
-        backup_form.addWidget(restore_backup_btn)
-        
-        # Lista de backups
-        self.backup_list = QListWidget()
-        backup_form.addWidget(QLabel("Backups Disponíveis:"))
-        backup_form.addWidget(self.backup_list)
-        
-        backup_group.setLayout(backup_form)
-        backup_layout.addWidget(backup_group)
-        
-        backup_tab.setLayout(backup_layout)
-        tabs.addTab(backup_tab, "Backup")
-        
-        # Tab de Notificações
-        notifications_tab = QWidget()
-        notifications_layout = QVBoxLayout()
-        
-        # Configurações de notificação
-        notify_group = QGroupBox("Configurações de Notificação")
-        notify_form = QFormLayout()
-        
-        self.notify_expiry = QCheckBox("Notificar antes da expiração")
-        self.notify_expiry.setChecked(True)
-        self.notify_days = QSpinBox()
-        self.notify_days.setValue(7)
-        self.notify_days.setRange(1, 30)
-        
-        notify_form.addRow("", self.notify_expiry)
-        notify_form.addRow("Dias antes:", self.notify_days)
-        
-        notify_group.setLayout(notify_form)
-        notifications_layout.addWidget(notify_group)
-        
-        # Lista de notificações
-        self.notifications_list = QListWidget()
-        notifications_layout.addWidget(QLabel("Notificações:"))
-        notifications_layout.addWidget(self.notifications_list)
-        
-        notifications_tab.setLayout(notifications_layout)
-        tabs.addTab(notifications_tab, "Notificações")
-        
-        layout.addWidget(tabs)
-        self.setLayout(layout)
-        
-        # Carregar dados iniciais
-        self.load_usage_history()
-        self.load_backups()
-        self.check_notifications()
-        
-    def load_usage_history(self):
-        try:
-            history = self.license_manager.get_usage_history()
-            self.usage_list.clear()
-            for entry in history:
-                self.usage_list.addItem(
-                    f"{entry['timestamp']} - {entry['action']}"
-                )
-        except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Erro ao carregar histórico: {str(e)}")
-    
-    def generate_report(self):
-        try:
-            start = self.start_date.date().toPyDate()
-            end = self.end_date.date().toPyDate()
-            
-            report = self.license_manager.generate_report(start, end)
-            
-            # Formatar relatório
-            text = "RELATÓRIO DE LICENÇAS\n"
-            text += f"Período: {start} até {end}\n\n"
-            
-            text += "Ativações: {}\n".format(report.get('activations', 0))
-            text += "Licenças Ativas: {}\n".format(report.get('active_licenses', 0))
-            text += "Vendas: R$ {:.2f}\n".format(report.get('sales', 0.0))
-            
-            if report.get('reseller_sales'):
-                text += "\nVendas por Revendedor:\n"
-                for reseller in report['reseller_sales']:
-                    text += f"- {reseller['name']}: R$ {reseller['sales']:.2f}\n"
-            
-            self.report_text.setText(text)
-            
-        except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Erro ao gerar relatório: {str(e)}")
-    
-    def create_backup(self):
-        try:
-            filename = self.license_manager.create_backup()
-            self.load_backups()
-            QMessageBox.information(self, "Sucesso", f"Backup criado: {filename}")
-        except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Erro ao criar backup: {str(e)}")
-    
-    def restore_backup(self):
-        try:
-            current = self.backup_list.currentItem()
-            if not current:
-                QMessageBox.warning(self, "Erro", "Selecione um backup para restaurar")
-                return
-                
-            filename = current.text()
-            self.license_manager.restore_backup(filename)
-            QMessageBox.information(self, "Sucesso", "Backup restaurado com sucesso!")
-            
-        except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Erro ao restaurar backup: {str(e)}")
-    
-    def load_backups(self):
-        try:
-            backups = self.license_manager.list_backups()
-            self.backup_list.clear()
-            self.backup_list.addItems(backups)
-        except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Erro ao listar backups: {str(e)}")
-    
-    def check_notifications(self):
-        try:
-            if not self.notify_expiry.isChecked():
-                return
-                
-            days = self.notify_days.value()
-            notifications = self.license_manager.check_expiry(days)
-            
-            self.notifications_list.clear()
-            for notif in notifications:
-                self.notifications_list.addItem(
-                    f"Licença expira em {notif['days']} dias: {notif['key']}"
-                )
-                
-        except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Erro ao verificar notificações: {str(e)}")
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -909,9 +387,6 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(AudioWindow(), "Áudio")
         self.tabs.addTab(LanguageWindow(), "Idiomas")
         self.tabs.addTab(OtherWindow(), "Outras Ferramentas")
-        self.tabs.addTab(LicenseStatusWindow(self.license_manager), "Status da Licença")
-        self.tabs.addTab(LicenseManagerWindow(self.license_manager), "Gerenciar Licença")
-        self.tabs.addTab(LicenseHistoryWindow(self.license_manager), "Histórico e Relatórios")
 
     def add_interface_design_tab(self):
         tab = QWidget()
@@ -1161,7 +636,7 @@ class MainWindow(QMainWindow):
         # Verificar se já existe uma licença salva
         saved_key = self.license_manager.load_license()
         if saved_key:
-            success, _ = self.license_manager.verify_license_online(saved_key)
+            success, _ = self.license_manager.verify_license(saved_key)
             if success:
                 return True
         
@@ -1950,19 +1425,88 @@ class ImageGeneratorWindow(QWidget):
                 # Processar resposta e exibir imagem
                 image_data = response.json()["artifacts"][0]["base64"]
                 image = Image.open(BytesIO(base64.b64decode(image_data)))
-                self.current_image = image
-                self.save_image()
+                self.display_image(image)
+                self.add_to_history(image)
             else:
-                self.log("Erro ao gerar imagem")
-                QMessageBox.critical(self, "Erro", "Erro ao gerar imagem")
+                self.log(f"Erro na API: {response.status_code} - {response.text}")
+                self.generate_demo_image()
+            
         except Exception as e:
-            self.log(f"Erro ao gerar imagem: {str(e)}")
-            QMessageBox.critical(self, "Erro", f"Erro ao gerar imagem: {str(e)}")
+            self.log(f"Erro: {str(e)}")
+
+    def add_to_history(self, image):
+        """Adiciona a imagem ao histórico"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.history_list.addItem(f"Imagem gerada em {timestamp}")
+        self.current_image = image
+
+    def display_image(self, image):
+        """Exibe a imagem em uma nova janela"""
+        self.image_window = ImageDisplayWindow(image)
+        self.image_window.show()
 
     def save_image(self):
-        if self.current_image:
-            self.current_image.save("current_image.png")
-            self.history_list.addItem("Imagem salva como current_image.png")
-            QMessageBox.information(self, "Sucesso", "Imagem salva com sucesso!")
-        else:
-            QMessageBox.warning(self, "Aviso", "Gerar uma imagem primeiro!")
+        if not self.current_image:
+            QMessageBox.warning(self, "Aviso", "Gere uma imagem primeiro!")
+            return
+
+        try:
+            if not os.path.exists("imagens"):
+                os.makedirs("imagens")
+
+            from datetime import datetime
+            filename = f"imagens/imagem_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            
+            self.current_image.save(filename)
+            QMessageBox.information(self, "Sucesso", f"Imagem salva em {filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Erro ao salvar imagem: {str(e)}")
+
+    def generate_demo_image(self):
+        """Gera uma imagem de demonstração mais elaborada"""
+        self.log("Gerando imagem de demonstração...")
+        
+        width = height = 512
+        image = Image.new('RGB', (width, height))
+        
+        for y in range(height):
+            for x in range(width):
+                r = int(abs(math.sin(x/30)) * 255)
+                g = int(abs(math.cos(y/30)) * 255)
+                b = int(abs(math.sin((x+y)/60)) * 255)
+                image.putpixel((x, y), (r, g, b))
+        
+        self.display_image(image)
+        self.log("Imagem de demonstração gerada!")
+
+    def send_license_to_customer(self, key, email):
+        # Use um serviço de email como SendGrid ou Amazon SES
+        send_email(
+            to=email,
+            subject="Sua licença do DarkTikTok",
+            body=f"Sua chave de licença é: {key}\n\n"
+                 f"Instruções de instalação: ..."
+        )
+
+def send_email(to_email, subject, body):
+    """
+    Função para enviar emails
+    Nota: Esta é uma implementação simulada. Para uso real, 
+    você precisará configurar um servidor SMTP ou usar um serviço de email
+    """
+    try:
+        print(f"Simulando envio de email:")
+        print(f"Para: {to_email}")
+        print(f"Assunto: {subject}")
+        print(f"Mensagem: {body}")
+        return True
+    except Exception as e:
+        print(f"Erro ao enviar email: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
