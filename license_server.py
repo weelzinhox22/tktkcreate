@@ -4,11 +4,12 @@ import sqlite3
 import hashlib
 import os
 import secrets
+import uuid
 
 app = Flask(__name__)
 
-# Chaves válidas pré-definidas
-VALID_LICENSES = {
+# Banco de dados de licenças (em memória para exemplo)
+LICENSES_DB = {
     "DARKTK-PRO-2024": {
         "type": "Professional",
         "expires": "2025-12-31",
@@ -17,7 +18,7 @@ VALID_LICENSES = {
     "DARKTK-STD-2024": {
         "type": "Standard",
         "expires": "2025-12-31",
-        "features": ["basic", "audio", "images"]
+        "features": ["basic"]
     }
 }
 
@@ -42,20 +43,36 @@ def home():
 
 @app.route('/licenses/generate', methods=['POST'])
 def generate_license():
+    """Gera uma nova licença"""
     try:
         data = request.json
-        order_id = data.get('order_id')
+        license_type = data.get('type', 'standard')
+        duration_days = data.get('duration', 365)
         
         # Gerar chave única
-        timestamp = datetime.now().strftime('%Y%m%d%H%M')
-        unique_id = hashlib.sha256(f"{order_id}{timestamp}".encode()).hexdigest()[:12]
-        key = f"DARKTK-{unique_id.upper()}"
+        unique_id = str(uuid.uuid4())[:8].upper()
+        key = f"DARKTK-{license_type[:3].upper()}-{unique_id}"
+        
+        # Calcular data de expiração
+        expiry_date = (datetime.datetime.now() + 
+                      datetime.timedelta(days=duration_days)).strftime('%Y-%m-%d')
+        
+        # Definir features baseado no tipo
+        features = ["all"] if license_type.lower() == "professional" else ["basic"]
+        
+        # Salvar licença
+        LICENSES_DB[key] = {
+            "type": license_type,
+            "expires": expiry_date,
+            "features": features
+        }
         
         return jsonify({
             "success": True,
             "key": key,
-            "message": "License generated successfully"
+            "license_data": LICENSES_DB[key]
         })
+        
     except Exception as e:
         return jsonify({
             "success": False,
@@ -64,17 +81,23 @@ def generate_license():
 
 @app.route('/licenses/verify', methods=['POST'])
 def verify_license():
+    """Verifica uma licença"""
     try:
         data = request.json
         key = data.get('license_key')
         
-        if key in VALID_LICENSES:
-            return jsonify({
-                "valid": True,
-                "license_data": VALID_LICENSES[key]
-            })
-            
+        if key in LICENSES_DB:
+            license_data = LICENSES_DB[key]
+            # Verificar expiração
+            expiry = datetime.datetime.strptime(license_data['expires'], '%Y-%m-%d')
+            if expiry > datetime.datetime.now():
+                return jsonify({
+                    "valid": True,
+                    "license_data": license_data
+                })
+        
         return jsonify({"valid": False})
+        
     except Exception as e:
         return jsonify({
             "success": False,

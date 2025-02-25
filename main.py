@@ -2,7 +2,7 @@ import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                            QPushButton, QLabel, QComboBox, QSpinBox, QLineEdit,
                            QTextEdit, QMessageBox, QHBoxLayout, QGridLayout, QFileDialog,
-                           QDoubleSpinBox, QListWidget, QTabWidget, QGroupBox, QDialog)
+                           QDoubleSpinBox, QListWidget, QTabWidget, QGroupBox, QDialog, QFormLayout)
 from PyQt6.QtCore import Qt, QUrl, QTimer
 from PyQt6.QtGui import QIcon, QFont, QPixmap
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -202,6 +202,9 @@ class WebViewWindow(QWidget):
 class LicenseManager:
     def __init__(self):
         self.license_file = "config/license.key"
+        # Atualize para usar o servidor online
+        self.api_url = "https://tktkcreate.onrender.com/licenses"
+        self.app_secret = "7d9f8b3a2e1c4b5a6d8e9f2c1b4a7d3e"
         # Licenças válidas hardcoded para teste
         self.valid_licenses = {
             "DARKTK-PRO-2024": {
@@ -328,6 +331,84 @@ class LicenseDialog(QDialog):
         else:
             self.status_label.setText("Chave de licença inválida!")
 
+class LicenseStatusWindow(QWidget):
+    def __init__(self, license_manager):
+        super().__init__()
+        self.license_manager = license_manager
+        self.setup_ui()
+        
+    def setup_ui(self):
+        layout = QVBoxLayout()
+        
+        # Grupo de informações da licença
+        info_group = QGroupBox("Informações da Licença")
+        info_layout = QFormLayout()
+        
+        # Status atual
+        self.status_label = QLabel("Verificando...")
+        self.status_label.setStyleSheet("font-weight: bold;")
+        info_layout.addRow("Status:", self.status_label)
+        
+        # Tipo de licença
+        self.type_label = QLabel("-")
+        info_layout.addRow("Tipo:", self.type_label)
+        
+        # Data de expiração
+        self.expiry_label = QLabel("-")
+        info_layout.addRow("Expira em:", self.expiry_label)
+        
+        # Chave
+        self.key_label = QLabel("-")
+        info_layout.addRow("Chave:", self.key_label)
+        
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+        
+        # Botão de verificar
+        check_btn = QPushButton("Verificar Licença")
+        check_btn.setProperty("class", "primary")
+        check_btn.clicked.connect(self.check_license)
+        layout.addWidget(check_btn)
+        
+        # Área de status
+        self.message_label = QLabel("")
+        self.message_label.setWordWrap(True)
+        layout.addWidget(self.message_label)
+        
+        layout.addStretch()
+        self.setLayout(layout)
+        
+        # Verificar licença ao iniciar
+        QTimer.singleShot(100, self.check_license)
+    
+    def check_license(self):
+        try:
+            key = self.license_manager.load_license()
+            if not key:
+                self.update_status("Sem licença", "error")
+                return
+                
+            success, license_data = self.license_manager.verify_license_online(key)
+            
+            if success:
+                self.status_label.setText("Ativa")
+                self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+                self.type_label.setText(license_data["type"])
+                self.expiry_label.setText(license_data["expires"])
+                self.key_label.setText(key)
+                self.message_label.setText("Licença válida!")
+                self.message_label.setStyleSheet("color: #4CAF50;")
+            else:
+                self.update_status("Expirada", "error")
+        except Exception as e:
+            self.update_status(f"Erro: {str(e)}", "error")
+    
+    def update_status(self, message, status="normal"):
+        self.status_label.setText("Inativa")
+        self.status_label.setStyleSheet("color: #FF5252; font-weight: bold;")
+        self.message_label.setText(message)
+        self.message_label.setStyleSheet("color: #FF5252;")
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -371,6 +452,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(AudioWindow(), "Áudio")
         self.tabs.addTab(LanguageWindow(), "Idiomas")
         self.tabs.addTab(OtherWindow(), "Outras Ferramentas")
+        self.tabs.addTab(LicenseStatusWindow(self.license_manager), "Status da Licença")
 
     def add_interface_design_tab(self):
         tab = QWidget()
