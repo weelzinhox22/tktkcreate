@@ -7,8 +7,13 @@ import os
 app = Flask(__name__)
 
 # Configurar banco de dados
+DATABASE_PATH = 'data/licenses.db'
+
 def init_db():
-    with sqlite3.connect('licenses.db') as conn:
+    # Garantir que o diretório existe
+    os.makedirs('data', exist_ok=True)
+    
+    with sqlite3.connect(DATABASE_PATH) as conn:
         conn.execute('''
         CREATE TABLE IF NOT EXISTS licenses (
             id TEXT PRIMARY KEY,
@@ -22,7 +27,14 @@ def init_db():
             purchase_id TEXT
         )
         ''')
+        conn.commit()
 
+def get_db():
+    db = sqlite3.connect(DATABASE_PATH)
+    db.row_factory = sqlite3.Row
+    return db
+
+# Inicializar banco de dados na inicialização
 init_db()
 
 @app.route('/api/verify_license', methods=['POST'])
@@ -30,8 +42,9 @@ def verify_license():
     data = request.json
     key = data.get('key')
     
-    with sqlite3.connect('licenses.db') as conn:
-        cursor = conn.cursor()
+    try:
+        db = get_db()
+        cursor = db.cursor()
         cursor.execute(
             'SELECT * FROM licenses WHERE key = ? AND status = "active"',
             (key,)
@@ -48,13 +61,18 @@ def verify_license():
             'UPDATE licenses SET last_check = ? WHERE key = ?',
             (datetime.now().isoformat(), key)
         )
-        conn.commit()
+        db.commit()
         
         return jsonify({
             'valid': True,
-            'type': license[3],
-            'expires_at': license[6]
+            'type': license['type'],
+            'expires_at': license['expires_at']
         })
+    except Exception as e:
+        print(f"Erro na verificação: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
 
 @app.route('/api/create_license', methods=['POST'])
 def create_license():
@@ -64,16 +82,17 @@ def create_license():
     if admin_key != 'DARKTK-MASTER-2024':
         return jsonify({'error': 'Acesso negado'}), 401
     
-    email = data.get('email')
-    license_type = data.get('type', 'standard')
-    duration_days = data.get('duration', 30)
-    purchase_id = data.get('purchase_id')
-    
-    license_key = f"DARKTK-{uuid.uuid4().hex[:8].upper()}"
-    expires_at = (datetime.now() + timedelta(days=duration_days)).isoformat()
-    
-    with sqlite3.connect('licenses.db') as conn:
-        cursor = conn.cursor()
+    try:
+        email = data.get('email')
+        license_type = data.get('type', 'standard')
+        duration_days = data.get('duration', 30)
+        purchase_id = data.get('purchase_id')
+        
+        license_key = f"DARKTK-{uuid.uuid4().hex[:8].upper()}"
+        expires_at = (datetime.now() + timedelta(days=duration_days)).isoformat()
+        
+        db = get_db()
+        cursor = db.cursor()
         cursor.execute('''
         INSERT INTO licenses (id, email, key, type, status, created_at, expires_at, purchase_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -87,13 +106,18 @@ def create_license():
             expires_at,
             purchase_id
         ))
-        conn.commit()
-    
-    return jsonify({
-        'success': True,
-        'license_key': license_key,
-        'expires_at': expires_at
-    })
+        db.commit()
+        
+        return jsonify({
+            'success': True,
+            'license_key': license_key,
+            'expires_at': expires_at
+        })
+    except Exception as e:
+        print(f"Erro na criação: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
 
 @app.route('/api/list_licenses', methods=['GET'])
 def list_licenses():
@@ -102,22 +126,18 @@ def list_licenses():
     if admin_key != 'DARKTK-MASTER-2024':
         return jsonify({'error': 'Acesso negado'}), 401
     
-    with sqlite3.connect('licenses.db') as conn:
-        cursor = conn.cursor()
+    try:
+        db = get_db()
+        cursor = db.cursor()
         cursor.execute('SELECT * FROM licenses')
         licenses = cursor.fetchall()
         
-        return jsonify([{
-            'id': lic[0],
-            'email': lic[1],
-            'key': lic[2],
-            'type': lic[3],
-            'status': lic[4],
-            'created_at': lic[5],
-            'expires_at': lic[6],
-            'last_check': lic[7],
-            'purchase_id': lic[8]
-        } for lic in licenses])
+        return jsonify([dict(lic) for lic in licenses])
+    except Exception as e:
+        print(f"Erro na listagem: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
 
 @app.route('/api/revoke_license', methods=['POST'])
 def revoke_license():
@@ -127,17 +147,21 @@ def revoke_license():
     if admin_key != 'DARKTK-MASTER-2024':
         return jsonify({'error': 'Acesso negado'}), 401
     
-    key = data.get('key')
-    
-    with sqlite3.connect('licenses.db') as conn:
-        cursor = conn.cursor()
+    try:
+        key = data.get('key')
+        db = get_db()
+        cursor = db.cursor()
         cursor.execute(
             'UPDATE licenses SET status = "revoked" WHERE key = ?',
             (key,)
         )
-        conn.commit()
-    
-    return jsonify({'success': True})
+        db.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Erro na revogação: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        db.close()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000))) 
