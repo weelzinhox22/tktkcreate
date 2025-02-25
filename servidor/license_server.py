@@ -95,6 +95,30 @@ def create_license():
         'expires_at': expires_at
     })
 
+@app.route('/api/list_licenses', methods=['GET'])
+def list_licenses():
+    admin_key = request.args.get('admin_key')
+    
+    if admin_key != 'DARKTK-MASTER-2024':
+        return jsonify({'error': 'Acesso negado'}), 401
+    
+    with sqlite3.connect('licenses.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM licenses')
+        licenses = cursor.fetchall()
+        
+        return jsonify([{
+            'id': lic[0],
+            'email': lic[1],
+            'key': lic[2],
+            'type': lic[3],
+            'status': lic[4],
+            'created_at': lic[5],
+            'expires_at': lic[6],
+            'last_check': lic[7],
+            'purchase_id': lic[8]
+        } for lic in licenses])
+
 @app.route('/api/revoke_license', methods=['POST'])
 def revoke_license():
     data = request.json
