@@ -113,6 +113,12 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 }
 """
 
+class UserRole:
+    """Define os tipos de usuários do sistema"""
+    CUSTOMER = "customer"
+    RESELLER = "reseller"
+    ADMIN = "admin"
+
 # Função para carregar dados do arquivo JSON
 def load_data():
     try:
@@ -201,58 +207,37 @@ class WebViewWindow(QWidget):
 class LicenseManager:
     def __init__(self):
         self.license_file = "config/license.key"
-        self.license_data_file = "config/valid_licenses.json"
-        self.create_config_dir()
-        
-    def create_config_dir(self):
-        if not os.path.exists("config"):
-            os.makedirs("config")
-            
-        # Criar arquivo de licenças válidas se não existir
-        if not os.path.exists(self.license_data_file):
-            default_licenses = {
-                "DARKTK-PRO-2024": {
-                    "type": "Professional",
-                    "expires": "2025-12-31",
-                    "features": ["all"]
-                },
-                "DARKTK-STD-2024": {
-                    "type": "Standard",
-                    "expires": "2025-12-31",
-                    "features": ["basic", "audio", "images"]
-                },
-                "DARKTK-NEW-KEY1": {
-                    "type": "Professional",
-                    "expires": "2025-12-31",
-                    "features": ["all"]
-                },
-                "CUSTOM-KEY-123": {
-                    "type": "Standard",
-                    "expires": "2024-12-31",
-                    "features": ["basic", "audio"]
-                }
+        self.master_key = "DARKTK-MASTER-2024"
+        self.valid_licenses = {
+            self.master_key: {
+                "type": "Master",
+                "expires": "2099-12-31",
+                "activations": 0,
+                "max_activations": 999,
+                "features": ["all"],
+                "role": UserRole.ADMIN
             }
-            with open(self.license_data_file, 'w') as f:
-                json.dump(default_licenses, f, indent=4)
+        }
+        self.current_role = UserRole.CUSTOMER
 
-    def get_valid_licenses(self):
-        try:
-            with open(self.license_data_file, 'r') as f:
-                return json.load(f)
-        except:
-            return {}
-
-    def verify_license(self, key):
-        valid_licenses = self.get_valid_licenses()
-        if key in valid_licenses:
-            license_data = valid_licenses[key]
-            expiry = datetime.datetime.strptime(license_data['expires'], '%Y-%m-%d')
-            if expiry > datetime.datetime.now():
-                return True, license_data
+    def verify_license(self, license_key):
+        """Verifica se a licença é válida"""
+        # Verifica se é a chave master
+        if license_key == self.master_key:
+            self.current_role = UserRole.ADMIN
+            return True, self.valid_licenses[license_key]
+            
+        # Verifica outras licenças
+        if license_key in self.valid_licenses:
+            license_data = self.valid_licenses[license_key].copy()
+            license_data['activations'] += 1
+            return True, license_data
+            
         return False, None
 
     def save_license(self, key):
         try:
+            os.makedirs("config", exist_ok=True)
             with open(self.license_file, 'w') as f:
                 f.write(key)
             return True
@@ -636,7 +621,9 @@ class MainWindow(QMainWindow):
         # Verificar se já existe uma licença salva
         saved_key = self.license_manager.load_license()
         if saved_key:
-            success, _ = self.license_manager.verify_license(saved_key)
+            # Supondo que você tenha o email salvo ou de alguma forma disponível
+            email = "joaohudson@gmail.com"  # Substitua pelo email correto ou método para obtê-lo
+            success, license_data = self.license_manager.verify_license(saved_key)
             if success:
                 return True
         
