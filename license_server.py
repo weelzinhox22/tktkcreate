@@ -25,9 +25,30 @@ LICENSES_DB = {
 def init_db():
     conn = sqlite3.connect('licenses.db')
     c = conn.cursor()
+    # Tabela de licenças
     c.execute('''CREATE TABLE IF NOT EXISTS licenses
-                 (key TEXT PRIMARY KEY, order_id TEXT, 
-                  type TEXT, expires TEXT, active INTEGER)''')
+                 (key TEXT PRIMARY KEY,
+                  type TEXT,
+                  expires TEXT,
+                  activations INTEGER DEFAULT 0,
+                  max_activations INTEGER DEFAULT 3,
+                  reseller_id TEXT,
+                  created_at TEXT,
+                  status TEXT)''')
+    
+    # Tabela de revendedores
+    c.execute('''CREATE TABLE IF NOT EXISTS resellers
+                 (id TEXT PRIMARY KEY,
+                  name TEXT,
+                  email TEXT,
+                  commission_rate REAL)''')
+    
+    # Tabela de uso
+    c.execute('''CREATE TABLE IF NOT EXISTS usage_logs
+                 (id TEXT PRIMARY KEY,
+                  license_key TEXT,
+                  action TEXT,
+                  timestamp TEXT)''')
     conn.commit()
     conn.close()
 
@@ -43,79 +64,119 @@ def home():
 
 @app.route('/licenses/generate', methods=['POST'])
 def generate_license():
-    """Gera uma nova licença"""
     try:
         data = request.json
         license_type = data.get('type', 'standard')
         duration_days = data.get('duration', 365)
+        reseller_id = data.get('reseller_id')
+        max_activations = data.get('max_activations', 3)
         
         # Gerar chave única
         unique_id = str(uuid.uuid4())[:8].upper()
         key = f"DARKTK-{license_type[:3].upper()}-{unique_id}"
         
-        # Calcular data de expiração
-        expiry_date = (datetime.datetime.now() + 
-                      datetime.timedelta(days=duration_days)).strftime('%Y-%m-%d')
-        
-        # Definir features baseado no tipo
-        features = ["all"] if license_type.lower() == "professional" else ["basic"]
-        
-        # Salvar licença
-        LICENSES_DB[key] = {
-            "type": license_type,
-            "expires": expiry_date,
-            "features": features
-        }
+        # Salvar no banco
+        conn = sqlite3.connect('licenses.db')
+        c = conn.cursor()
+        c.execute('''INSERT INTO licenses 
+                     (key, type, expires, max_activations, reseller_id, created_at, status)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                 (key, license_type,
+                  (datetime.datetime.now() + datetime.timedelta(days=duration_days)).strftime('%Y-%m-%d'),
+                  max_activations, reseller_id,
+                  datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                  'active'))
+        conn.commit()
+        conn.close()
         
         return jsonify({
             "success": True,
             "key": key,
-            "license_data": LICENSES_DB[key]
+            "type": license_type,
+            "max_activations": max_activations
         })
-        
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 400
+        return jsonify({"success": False, "error": str(e)}), 400
 
 @app.route('/licenses/verify', methods=['POST'])
 def verify_license():
-    """Verifica uma licença"""
     try:
         data = request.json
         key = data.get('license_key')
         
-        if key in LICENSES_DB:
-            license_data = LICENSES_DB[key]
-            # Verificar expiração
-            expiry = datetime.datetime.strptime(license_data['expires'], '%Y-%m-%d')
-            if expiry > datetime.datetime.now():
+        conn = sqlite3.connect('licenses.db')
+        c = conn.cursor()
+        c.execute('SELECT * FROM licenses WHERE key = ?', (key,))
+        license_data = c.fetchone()
+        
+        if license_data:
+            # Verificar status e expiração
+            expires = datetime.datetime.strptime(license_data[2], '%Y-%m-%d')
+            activations = license_data[3]
+            max_activations = license_data[4]
+            status = license_data[7]
+            
+            if status == 'active' and expires > datetime.datetime.now() and activations < max_activations:
+                # Registrar ativação
+                c.execute('UPDATE licenses SET activations = activations + 1 WHERE key = ?', (key,))
+                # Registrar uso
+                c.execute('''INSERT INTO usage_logs (id, license_key, action, timestamp)
+                            VALUES (?, ?, ?, ?)''',
+                         (str(uuid.uuid4()), key, 'verify',
+                          datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                conn.commit()
+                
                 return jsonify({
                     "valid": True,
-                    "license_data": license_data
+                    "type": license_data[1],
+                    "expires": license_data[2],
+                    "activations": activations + 1,
+                    "max_activations": max_activations
                 })
         
+        conn.close()
         return jsonify({"valid": False})
-        
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 400
+        return jsonify({"success": False, "error": str(e)}), 400
 
-@app.route('/licenses/deactivate', methods=['POST'])
-def deactivate_license():
-    data = request.json
-    order_id = data.get('order_id')
-    
-    conn = sqlite3.connect('licenses.db')
-    c = conn.cursor()
-    c.execute('UPDATE licenses SET active = 0 WHERE order_id = ?', (order_id,))
-    conn.commit()
-    conn.close()
-    
-    return jsonify({"success": True})
+@app.route('/licenses/upgrade', methods=['POST'])
+def upgrade_license():
+    try:
+        data = request.json
+        key = data.get('license_key')
+        new_type = data.get('new_type')
+        
+        conn = sqlite3.connect('licenses.db')
+        c = conn.cursor()
+        c.execute('UPDATE licenses SET type = ? WHERE key = ?', (new_type, key))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": "License upgraded successfully"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+
+@app.route('/resellers/register', methods=['POST'])
+def register_reseller():
+    try:
+        data = request.json
+        reseller_id = str(uuid.uuid4())
+        
+        conn = sqlite3.connect('licenses.db')
+        c = conn.cursor()
+        c.execute('''INSERT INTO resellers (id, name, email, commission_rate)
+                     VALUES (?, ?, ?, ?)''',
+                 (reseller_id, data.get('name'), data.get('email'),
+                  data.get('commission_rate', 0.2)))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "reseller_id": reseller_id
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 400
 
 if __name__ == '__main__':
     init_db()
