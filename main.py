@@ -207,49 +207,39 @@ class WebViewWindow(QWidget):
 class LicenseManager:
     def __init__(self):
         self.license_file = "config/license.key"
-        self.master_key = "DARKTK-MASTER-2024"
-        self.valid_licenses = {
-            self.master_key: {
-                "type": "Master",
-                "expires": "2099-12-31",
-                "activations": 0,
-                "max_activations": 999,
-                "features": ["all"],
-                "role": UserRole.ADMIN
-            }
-        }
-        self.current_role = UserRole.CUSTOMER
+        self.api_url = "http://localhost:5000"  # URL do servidor de licenciamento
 
     def verify_license(self, license_key):
-        """Verifica se a licença é válida"""
-        # Verifica se é a chave master
-        if license_key == self.master_key:
-            self.current_role = UserRole.ADMIN
-            return True, self.valid_licenses[license_key]
-            
-        # Verifica outras licenças
-        if license_key in self.valid_licenses:
-            license_data = self.valid_licenses[license_key].copy()
-            license_data['activations'] += 1
-            return True, license_data
-            
-        return False, None
-
-    def save_license(self, key):
         try:
-            os.makedirs("config", exist_ok=True)
-            with open(self.license_file, 'w') as f:
-                f.write(key)
-            return True
-        except:
+            response = requests.post(f"{self.api_url}/verify_license", json={"license_key": license_key})
+            if response.status_code == 200:
+                return response.json().get("valid", False)
+            return False
+        except requests.exceptions.RequestException as e:
+            print(f"Erro de conexão: {e}")
             return False
 
     def load_license(self):
         try:
             with open(self.license_file, 'r') as f:
                 return f.read().strip()
-        except:
+        except FileNotFoundError:
             return None
+
+    def save_license(self, license_key):
+        with open(self.license_file, 'w') as f:
+            f.write(license_key)
+
+    def create_license(self, email, license_type, duration, purchase_id):
+        # Implemente a lógica para criar uma nova licença
+        # Esta é uma implementação simulada
+        print(f"Criando nova licença para {email} com tipo {license_type}, duração {duration} dias e ID de compra {purchase_id}")
+        return {
+            "license_key": "SIMULATED-LICENSE-KEY",
+            "type": license_type,
+            "expires_at": (datetime.datetime.now() + datetime.timedelta(days=duration)).isoformat(),
+            "features": ["all"] if license_type == "professional" else ["basic"]
+        }
 
 class LicenseDialog(QDialog):
     def __init__(self, license_manager):
@@ -319,12 +309,12 @@ class LicenseDialog(QDialog):
     
     def activate_license(self):
         key = self.license_input.text().strip()
-        success, license_data = self.license_manager.verify_license(key)
+        success = self.license_manager.verify_license(key)
         
         if success:
             self.license_manager.save_license(key)
             self.status_label.setStyleSheet("color: #4CAF50;")
-            self.status_label.setText(f"Licença {license_data['type']} ativada com sucesso!")
+            self.status_label.setText("Licença ativada com sucesso!")
             QTimer.singleShot(1500, self.accept)
         else:
             self.status_label.setText("Chave de licença inválida!")
@@ -623,7 +613,7 @@ class MainWindow(QMainWindow):
         if saved_key:
             # Supondo que você tenha o email salvo ou de alguma forma disponível
             email = "joaohudson@gmail.com"  # Substitua pelo email correto ou método para obtê-lo
-            success, license_data = self.license_manager.verify_license(saved_key)
+            success = self.license_manager.verify_license(saved_key)
             if success:
                 return True
         
@@ -1492,8 +1482,39 @@ def send_email(to_email, subject, body):
         print(f"Erro ao enviar email: {str(e)}")
         return False
 
+def test_license_system():
+    """Função para testar o sistema de licenças"""
+    license_manager = LicenseManager()
+    
+    # Criar uma licença de teste
+    test_license = license_manager.create_license(
+        email="teste@exemplo.com",
+        license_type="professional",
+        duration=7,  # 7 dias de teste
+        purchase_id="TESTE-123"
+    )
+    
+    if test_license:
+        print("\nLicença criada com sucesso!")
+        print(f"Chave: {test_license['license_key']}")
+        print(f"Expira em: {test_license['expires_at']}")
+        
+        # Testar a verificação da licença
+        success = license_manager.verify_license(test_license['license_key'])
+        if success:
+            print("\nVerificação OK!")
+        else:
+            print("\nErro na verificação!")
+    else:
+        print("\nErro ao criar licença!")
+
+# No bloco principal
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    
+    # Testar sistema de licenças
+    test_license_system()
+    
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
