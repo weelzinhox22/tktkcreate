@@ -1,4 +1,4 @@
-from app import app
+from src.server.api import app
 
 # Para desenvolvimento local
 if __name__ == "__main__":
