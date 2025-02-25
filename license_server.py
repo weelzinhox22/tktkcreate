@@ -1,86 +1,120 @@
 from flask import Flask, request, jsonify
 from datetime import datetime, timedelta
 import sqlite3
-import hashlib
+import uuid
 import os
-import secrets
 
 app = Flask(__name__)
 
+# Configurar banco de dados
 def init_db():
-    conn = sqlite3.connect('licenses.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS licenses
-                 (key TEXT PRIMARY KEY, order_id TEXT, 
-                  type TEXT, expires TEXT, active INTEGER)''')
-    conn.commit()
-    conn.close()
+    with sqlite3.connect('licenses.db') as conn:
+        conn.execute('''
+        CREATE TABLE IF NOT EXISTS licenses (
+            id TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            key TEXT UNIQUE NOT NULL,
+            type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_check TEXT,
+            purchase_id TEXT
+        )
+        ''')
 
-def generate_unique_key(order_id):
-    """Gera uma chave única baseada no ID do pedido"""
-    timestamp = datetime.now().strftime('%Y%m%d%H%M')
-    unique_id = hashlib.sha256(f"{order_id}{timestamp}".encode()).hexdigest()[:12]
-    return f"DARKTK-{unique_id.upper()}"
+init_db()
 
-@app.route('/licenses/generate', methods=['POST'])
-def generate_license():
-    data = request.json
-    order_id = data.get('order_id')
-    license_type = data.get('type', 'standard')
-    
-    # Gerar chave única
-    key = generate_unique_key(order_id)
-    
-    # Salvar no banco
-    conn = sqlite3.connect('licenses.db')
-    c = conn.cursor()
-    c.execute('''INSERT INTO licenses (key, order_id, type, expires, active)
-                 VALUES (?, ?, ?, ?, ?)''',
-              (key, order_id, license_type, 
-               (datetime.now() + timedelta(days=365)).strftime('%Y-%m-%d'),
-               1))
-    conn.commit()
-    conn.close()
-    
-    return jsonify({"key": key})
-
-@app.route('/licenses/verify', methods=['POST'])
+@app.route('/api/verify_license', methods=['POST'])
 def verify_license():
     data = request.json
-    key = data.get('license_key')
+    key = data.get('key')
     
-    conn = sqlite3.connect('licenses.db')
-    c = conn.cursor()
-    c.execute('SELECT * FROM licenses WHERE key = ? AND active = 1', (key,))
-    result = c.fetchone()
-    conn.close()
-    
-    if result:
+    with sqlite3.connect('licenses.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT * FROM licenses WHERE key = ? AND status = "active"',
+            (key,)
+        )
+        license = cursor.fetchone()
+        
+        if not license:
+            return jsonify({
+                'valid': False,
+                'message': 'Licença inválida ou desativada'
+            }), 401
+            
+        # Atualizar último check
+        cursor.execute(
+            'UPDATE licenses SET last_check = ? WHERE key = ?',
+            (datetime.now().isoformat(), key)
+        )
+        conn.commit()
+        
         return jsonify({
-            "valid": True,
-            "license_data": {
-                "type": result[2],
-                "expires": result[3]
-            }
+            'valid': True,
+            'type': license[3],
+            'expires_at': license[6]
         })
-    return jsonify({"valid": False})
 
-@app.route('/licenses/deactivate', methods=['POST'])
-def deactivate_license():
+@app.route('/api/create_license', methods=['POST'])
+def create_license():
     data = request.json
-    order_id = data.get('order_id')
+    admin_key = data.get('admin_key')
     
-    conn = sqlite3.connect('licenses.db')
-    c = conn.cursor()
-    c.execute('UPDATE licenses SET active = 0 WHERE order_id = ?', (order_id,))
-    conn.commit()
-    conn.close()
+    if admin_key != 'DARKTK-MASTER-2024':
+        return jsonify({'error': 'Acesso negado'}), 401
     
-    return jsonify({"success": True})
+    email = data.get('email')
+    license_type = data.get('type', 'standard')
+    duration_days = data.get('duration', 30)
+    purchase_id = data.get('purchase_id')
+    
+    license_key = f"DARKTK-{uuid.uuid4().hex[:8].upper()}"
+    expires_at = (datetime.now() + timedelta(days=duration_days)).isoformat()
+    
+    with sqlite3.connect('licenses.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+        INSERT INTO licenses (id, email, key, type, status, created_at, expires_at, purchase_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            str(uuid.uuid4()),
+            email,
+            license_key,
+            license_type,
+            'active',
+            datetime.now().isoformat(),
+            expires_at,
+            purchase_id
+        ))
+        conn.commit()
+    
+    return jsonify({
+        'success': True,
+        'license_key': license_key,
+        'expires_at': expires_at
+    })
+
+@app.route('/api/revoke_license', methods=['POST'])
+def revoke_license():
+    data = request.json
+    admin_key = data.get('admin_key')
+    
+    if admin_key != 'DARKTK-MASTER-2024':
+        return jsonify({'error': 'Acesso negado'}), 401
+    
+    key = data.get('key')
+    
+    with sqlite3.connect('licenses.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'UPDATE licenses SET status = "revoked" WHERE key = ?',
+            (key,)
+        )
+        conn.commit()
+    
+    return jsonify({'success': True})
 
 if __name__ == '__main__':
-    init_db()
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
-
-print(secrets.token_hex(32)) 
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000))) 
