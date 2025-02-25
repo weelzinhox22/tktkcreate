@@ -7,6 +7,20 @@ import secrets
 
 app = Flask(__name__)
 
+# Chaves válidas pré-definidas
+VALID_LICENSES = {
+    "DARKTK-PRO-2024": {
+        "type": "Professional",
+        "expires": "2025-12-31",
+        "features": ["all"]
+    },
+    "DARKTK-STD-2024": {
+        "type": "Standard",
+        "expires": "2025-12-31",
+        "features": ["basic", "audio", "images"]
+    }
+}
+
 def init_db():
     conn = sqlite3.connect('licenses.db')
     c = conn.cursor()
@@ -54,15 +68,12 @@ def verify_license():
         data = request.json
         key = data.get('license_key')
         
-        # Simples verificação de formato
-        if key and key.startswith("DARKTK-"):
+        if key in VALID_LICENSES:
             return jsonify({
                 "valid": True,
-                "license_data": {
-                    "type": "standard",
-                    "expires": "2025-12-31"
-                }
+                "license_data": VALID_LICENSES[key]
             })
+            
         return jsonify({"valid": False})
     except Exception as e:
         return jsonify({

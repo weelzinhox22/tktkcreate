@@ -202,53 +202,29 @@ class WebViewWindow(QWidget):
 class LicenseManager:
     def __init__(self):
         self.license_file = "config/license.key"
-        self.api_url = "https://sua-api.com/licenses"  # Você precisará criar esta API
-        self.app_secret = "seu_secret_key"  # Chave secreta para validação
-        
-    def generate_license_key(self, order_id):
-        """Gera uma chave única baseada no ID do pedido"""
-        timestamp = datetime.now().strftime('%Y%m%d%H%M')
-        unique_id = str(uuid.uuid4())[:8]
-        key_base = f"{order_id}-{timestamp}-{unique_id}"
-        return hashlib.sha256(key_base.encode()).hexdigest()[:16].upper()
+        # Licenças válidas hardcoded para teste
+        self.valid_licenses = {
+            "DARKTK-PRO-2024": {
+                "type": "Professional",
+                "expires": "2025-12-31",
+                "features": ["all"]
+            },
+            "DARKTK-STD-2024": {
+                "type": "Standard",
+                "expires": "2025-12-31",
+                "features": ["basic"]
+            }
+        }
 
     def verify_license_online(self, key):
-        """Verifica a licença com o servidor"""
-        try:
-            response = requests.post(f"{self.api_url}/verify", json={
-                "license_key": key,
-                "app_secret": self.app_secret
-            })
-            
-            if response.status_code == 200:
-                data = response.json()
-                return data["valid"], data.get("license_data")
-            return False, None
-        except:
-            # Fallback para verificação offline se o servidor estiver indisponível
-            return self.verify_license_offline(key)
-
-    def verify_license_offline(self, key):
-        """Verificação offline (backup)"""
-        try:
-            with open(self.license_file, 'r') as f:
-                saved_data = json.load(f)
-                if saved_data["key"] == key and \
-                   datetime.strptime(saved_data["expires"], "%Y-%m-%d") > datetime.now():
-                    return True, saved_data
-        except:
-            pass
+        """Verifica se a licença é válida"""
+        if key in self.valid_licenses:
+            return True, self.valid_licenses[key]
         return False, None
-
-    def activate_license(self, key):
-        """Ativa uma nova licença"""
-        success, license_data = self.verify_license_online(key)
-        if success:
-            self.save_license_locally(key, license_data)
-        return success, license_data
 
     def save_license_locally(self, key, license_data):
         """Salva a licença localmente"""
+        os.makedirs("config", exist_ok=True)
         with open(self.license_file, 'w') as f:
             json.dump({
                 "key": key,
@@ -256,6 +232,24 @@ class LicenseManager:
                 "expires": license_data["expires"],
                 "features": license_data["features"]
             }, f)
+
+    def load_license(self):
+        """Carrega a licença salva"""
+        try:
+            if os.path.exists(self.license_file):
+                with open(self.license_file, 'r') as f:
+                    data = json.load(f)
+                    return data.get("key")
+            return None
+        except:
+            return None
+
+    def activate_license(self, key):
+        """Ativa uma nova licença"""
+        success, license_data = self.verify_license_online(key)
+        if success:
+            self.save_license_locally(key, license_data)
+        return success, license_data
 
 class LicenseDialog(QDialog):
     def __init__(self, license_manager):
@@ -626,7 +620,7 @@ class MainWindow(QMainWindow):
         # Verificar se já existe uma licença salva
         saved_key = self.license_manager.load_license()
         if saved_key:
-            success, _ = self.license_manager.verify_license(saved_key)
+            success, _ = self.license_manager.verify_license_online(saved_key)
             if success:
                 return True
         
