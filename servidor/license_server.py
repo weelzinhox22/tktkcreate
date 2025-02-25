@@ -44,7 +44,6 @@ def verify_license():
                 'message': 'Licença inválida ou desativada'
             }), 401
             
-        # Atualizar último check
         cursor.execute(
             'UPDATE licenses SET last_check = ? WHERE key = ?',
             (datetime.now().isoformat(), key)
